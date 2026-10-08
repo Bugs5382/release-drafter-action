@@ -1,0 +1,58 @@
+name: GolangCI
+# Pull requests only, and not while the PR is a draft. There is no push trigger:
+# the PR run already tested the tree being merged, so nothing reruns on push to
+# a branch or to main.
+on:
+  pull_request:
+    branches:
+      - main
+    types: [opened, synchronize, reopened, ready_for_review]
+permissions:
+  contents: read
+jobs:
+  build-test:
+    name: 🧪 Build & Test
+    if: github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: gofmt
+        run: |
+          unformatted="$(gofmt -l .)"
+          if [ -n "$unformatted" ]; then
+            echo "gofmt needed on:"; echo "$unformatted"; exit 1
+          fi
+      - name: Build
+        run: go build ./...
+      - name: Test
+        run: go test ./... -cover
+  lint:
+    name: 🧹 GolangCI
+    if: github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: GolangCI
+        uses: golangci/golangci-lint-action@v8
+        with:
+          version: v2.12.2
+          # Build from source with the job's Go, so a newer go.mod never
+          # outruns the toolchain the prebuilt binary was compiled with.
+          install-mode: goinstall
+          args: --timeout=3m

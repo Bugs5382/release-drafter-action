@@ -1,0 +1,13 @@
+[
+  {
+    "id": 3,
+    "tag_name": "v1.2.0",
+    "name": "v1.2.0",
+    "draft": true,
+    "prerelease": false,
+    "target_commitish": "main",
+    "created_at": "2026-03-01T00:00:00Z",
+    "html_url": "https://example.invalid/releases/3",
+    "upload_url": "https://example.invalid/releases/3/assets"
+  }
+]

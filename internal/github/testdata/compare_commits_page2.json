@@ -1,0 +1,23 @@
+{
+  "data": {
+    "repository": {
+      "ref": {
+        "compare": {
+          "commits": {
+            "pageInfo": { "hasNextPage": false, "endCursor": "" },
+            "nodes": [
+              {
+                "oid": "bbb222",
+                "committedDate": "2026-02-02T00:00:00Z",
+                "message": "fix: squashed merge with no direct association",
+                "author": { "name": "Bob", "user": null },
+                "authors": { "nodes": [{ "name": "Bob", "user": null }] },
+                "associatedPullRequests": { "nodes": [] }
+              }
+            ]
+          }
+        }
+      }
+    }
+  }
+}

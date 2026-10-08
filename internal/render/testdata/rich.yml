@@ -1,0 +1,48 @@
+header: "Top $OWNER/$REPOSITORY\n"
+footer: "\nBottom $RESOLVED_VERSION"
+template: |
+  ## Changes since $PREVIOUS_TAG
+  $CHANGES
+
+  Contributors: $CONTRIBUTORS
+
+  New:
+  $NEW_CONTRIBUTORS
+  Next: $NEXT_MAJOR_VERSION / $NEXT_MINOR_VERSION / $NEXT_PATCH_VERSION / $NEXT_PRERELEASE_VERSION
+name-template: 'Release $RESOLVED_VERSION'
+tag-template: 'v$RESOLVED_VERSION'
+tag-prefix: v
+version-template: '$MAJOR.$MINOR.$PATCH$PRERELEASE'
+prerelease-identifier: rc
+change-template: '* [$CATEGORY] $TITLE (#$NUMBER) by $AUTHORS ($AUTHOR)'
+change-author-template: '$AUTHOR_MENTION'
+change-authors-separator: ', '
+change-authors-final-separator: ' & '
+change-title-escapes: '\<*_&@#`'
+exclude-contributors: [carol]
+sort-by: title
+sort-direction: ascending
+categories:
+  - title: Breaking
+    exclusive: true
+    semver-increment: major
+    when:
+      conventional: {breaking: true}
+  - title: Features
+    semver-increment: minor
+    when:
+      - labels: [enhancement]
+      - conventional: {type: feat}
+  - title: Fixes
+    when: {conventional: {types: [fix]}, labels: [bug], labels-mode: all}
+  - title: Deps
+    collapse-after: 0
+    when: {labels: [dependencies]}
+  - title: Other
+  - type: pre-exclude
+    when: {labels: [skip-changelog]}
+replacers:
+  - search: '/(\w+)\[bot\]/g'
+    replace: 'bot:\U$1'
+  - search: 'Bottom'
+    replace: 'End'

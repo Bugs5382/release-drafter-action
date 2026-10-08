@@ -1,0 +1,78 @@
+# Emoji below are written as double-quoted YAML \U/\u escapes, not as
+# literal emoji bytes (the template's block scalar becomes a double-quoted
+# scalar with \n escapes for the same reason): the repository's PR hygiene
+# check forbids emoji outside the root .github directory, and this fixture
+# lives under internal/config/testdata/.github.
+#
+# Canonical release-drafter config for every Bugs5382 repo (libraries/extensions
+# use release-drafter; only apps would use release-please, which we do not ship).
+# The autolabeler derives the categorizing label from the conventional-commit PR
+# title, so labeling is near-zero-effort; job-label-checker is the backstop.
+name-template: 'v$RESOLVED_VERSION'
+tag-template: 'v$RESOLVED_VERSION'
+template: "# What Changed \U0001F440\n\n$CHANGES\n\n# Extra\n\n**Full Changelog**: https://github.com/$OWNER/$REPOSITORY/compare/$PREVIOUS_TAG...v$RESOLVED_VERSION\n"
+categories:
+  - title: "\U0001F4A5 Breaking Changes"
+    labels: [breaking]
+  - title: "\U0001F680 Features"
+    labels: [enhancement]
+  - title: "\U0001F41B Bug Fixes"
+    labels: [bug, fix]
+  - title: "\u26A1 Performance"
+    labels: [performance]
+  - title: "\u26A0\uFE0F Changes"
+    labels: [refactor, changed]
+  - title: "\u26D4\uFE0F Deprecated"
+    labels: [deprecated]
+  - title: "\U0001F5D1 Removed"
+    labels: [removed]
+  - title: "\U0001F510 Security"
+    labels: [security]
+  - title: "\U0001F4C4 Documentation"
+    labels: [documentation]
+  - title: "\U0001F9E9 Dependency Updates"
+    labels: [dependencies]
+    collapse-after: 5
+change-template: '- $TITLE @$AUTHOR (#$NUMBER)'
+change-title-escapes: '\<*_&'
+# Bot authors render as `@name[bot]`, which GitHub markdown does not autolink
+# (the bracketed login is not a valid mention). Rewrite the common ones to a
+# real link so the credit is clickable instead of plain text.
+replacers:
+  - search: '/@github-actions\[bot\]/g'
+    replace: '[@github-actions](https://github.com/apps/github-actions)'
+version-resolver:
+  major:
+    labels: [breaking]
+  minor:
+    labels: [enhancement]
+  patch:
+    labels: [fix, bug, performance, refactor, changed, deprecated, removed, security, documentation, dependencies]
+  default: patch
+autolabeler:
+  - label: breaking
+    title:
+      - '/^[a-z]+(\(.+\))?!:/'
+      - '/BREAKING[ -]CHANGE/'
+  - label: enhancement
+    title: ['/^feat(\(.+\))?:/']
+  - label: fix
+    title: ['/^fix(\(.+\))?:/']
+  - label: performance
+    title: ['/^perf(\(.+\))?:/']
+  - label: refactor
+    title: ['/^refactor(\(.+\))?:/']
+  - label: documentation
+    title: ['/^docs(\(.+\))?:/']
+  - label: dependencies
+    title:
+      - '/^build(\(.+\))?:/'
+      - '/^chore\(deps.*\):/'
+  - label: security
+    title: ['/^security(\(.+\))?:/']
+  - label: skip-changelog
+    title:
+      - '/^(ci|test|style)(\(.+\))?:/'
+      - '/^chore(?!\(deps)(\(.+\))?:/'
+exclude-labels:
+  - skip-changelog

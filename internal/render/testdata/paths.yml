@@ -1,0 +1,9 @@
+template: "$CHANGES"
+include-paths: ['src/**']
+exclude-paths: ['src/old.go']
+change-template: '- $TITLE @$AUTHOR (#$NUMBER)'
+categories:
+  - title: Code
+    when: {paths: ['*.go'], paths-mode: only}
+  - title: Anything
+    when: {paths: ['README.md', 'src/'], paths-mode: all}

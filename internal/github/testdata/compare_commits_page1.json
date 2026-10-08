@@ -1,0 +1,36 @@
+{
+  "data": {
+    "repository": {
+      "ref": {
+        "compare": {
+          "commits": {
+            "pageInfo": { "hasNextPage": true, "endCursor": "cursor-1" },
+            "nodes": [
+              {
+                "oid": "aaa111",
+                "committedDate": "2026-02-01T00:00:00Z",
+                "message": "feat: add widget",
+                "author": { "name": "Alice", "user": { "login": "alice" } },
+                "authors": { "nodes": [{ "name": "Alice", "user": { "login": "alice" } }] },
+                "associatedPullRequests": {
+                  "nodes": [
+                    {
+                      "title": "feat: add widget",
+                      "number": 10,
+                      "author": { "__typename": "User", "login": "alice", "url": "https://example.invalid/alice" },
+                      "baseRepository": { "nameWithOwner": "acme/widget" },
+                      "mergedAt": "2026-02-01T00:00:00Z",
+                      "isCrossRepository": false,
+                      "labels": { "nodes": [{ "name": "enhancement" }] },
+                      "merged": true
+                    }
+                  ]
+                }
+              }
+            ]
+          }
+        }
+      }
+    }
+  }
+}

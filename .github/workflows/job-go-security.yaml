@@ -1,0 +1,116 @@
+name: Go Security
+# Vulnerability and SAST scan for every Go repo, public and private. It is
+# composed in for the go ecosystem and laid down by the governance overlay only
+# where the repo has a root go.mod, so no job needs a hashFiles() guard.
+#
+# - govulncheck fails on a vulnerability the code can actually reach. A
+#   vulnerable module that is required but never called is reported, not failed.
+# - gosec fails on any finding. Silence a reviewed false positive in place with
+#   `#nosec G<rule> -- <reason>`.
+#
+# Neither tool needs a secret, so both run on public repos and on fork PRs.
+#
+# Neither tool is compiled from source on every run any more:
+# - gosec installs its pinned release binary, checked against the SHA-256 the
+#   release publishes. A tool built with an older Go cannot type-check code that
+#   needs a newer one, so when go.mod asks for a newer Go than the binary was
+#   built with, the step builds the same pinned version from source instead and
+#   says so in the log.
+# - govulncheck publishes no release binaries. It is built once per version and
+#   Go toolchain with the job's Go (so it always matches go.mod) and cached; later
+#   runs restore the binary instead of compiling it.
+#
+# Pull requests (not drafts) and the weekly schedule, which catches advisories
+# published after the last PR. There is no rerun on push to main: the PR run
+# already scanned the tree being merged.
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened, ready_for_review]
+  schedule:
+    - cron: '17 6 * * 1'
+  workflow_dispatch:
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+permissions:
+  contents: read
+jobs:
+  govulncheck:
+    name: 🛡️ Govulncheck
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      GOVULNCHECK_VERSION: v1.8.0
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+      - name: Setup Go
+        id: setup-go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      # Restore and save are separate steps so the binary is cached as soon as
+      # it is built, even when the scan below fails on a finding.
+      - name: Restore the govulncheck binary
+        id: govulncheck-cache
+        uses: actions/cache/restore@v6
+        with:
+          path: ${{ runner.temp }}/govulncheck/bin
+          key: govulncheck-${{ env.GOVULNCHECK_VERSION }}-${{ runner.os }}-${{ runner.arch }}-go${{ steps.setup-go.outputs.go-version }}
+      - name: Install govulncheck
+        if: steps.govulncheck-cache.outputs.cache-hit != 'true'
+        env:
+          GOBIN: ${{ runner.temp }}/govulncheck/bin
+        run: go install "golang.org/x/vuln/cmd/govulncheck@${GOVULNCHECK_VERSION}"
+      - name: Save the govulncheck binary
+        if: steps.govulncheck-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v6
+        with:
+          path: ${{ runner.temp }}/govulncheck/bin
+          key: ${{ steps.govulncheck-cache.outputs.cache-primary-key }}
+      - name: Run govulncheck
+        run: '"$RUNNER_TEMP/govulncheck/bin/govulncheck" ./...'
+
+  gosec:
+    name: 🔐 Gosec
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      GOSEC_VERSION: 2.29.0
+      # SHA-256 of gosec_<version>_linux_amd64.tar.gz, from the release's
+      # gosec_<version>_checksums.txt. Update it together with GOSEC_VERSION.
+      GOSEC_SHA256: 6431b119741c1f4a50fdfcf94e782e16b9e642afc8c7fa9b5d39d48bf3003095
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+      - name: Setup Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - name: Install gosec
+        run: |
+          set -euo pipefail
+          bin="$RUNNER_TEMP/gosec/bin"
+          mkdir -p "$bin"
+          tarball="gosec_${GOSEC_VERSION}_linux_amd64.tar.gz"
+          curl -sSfL -o "$RUNNER_TEMP/$tarball" \
+            "https://github.com/securego/gosec/releases/download/v${GOSEC_VERSION}/${tarball}"
+          echo "${GOSEC_SHA256}  $RUNNER_TEMP/$tarball" | sha256sum -c -
+          tar -xzf "$RUNNER_TEMP/$tarball" -C "$bin" gosec
+
+          # Compare language versions (major.minor): the binary's build Go
+          # against the go directive in go.mod.
+          built="$(go version "$bin/gosec" | awk '{print $2}' | sed 's/^go//' | cut -d. -f1,2)"
+          wanted="$(go mod edit -json | jq -r .Go | cut -d. -f1,2)"
+          echo "gosec v${GOSEC_VERSION} release binary built with Go ${built}; go.mod needs Go ${wanted}."
+          newest="$(printf '%s\n%s\n' "$built" "$wanted" | sort -V | tail -n1)"
+          if [ "$wanted" != "$built" ] && [ "$newest" = "$wanted" ]; then
+            echo "go.mod needs a newer Go than the release binary; building gosec v${GOSEC_VERSION} from source."
+            GOBIN="$bin" go install "github.com/securego/gosec/v2/cmd/gosec@v${GOSEC_VERSION}"
+          fi
+          echo "$bin" >> "$GITHUB_PATH"
+      - name: Run gosec
+        run: gosec -quiet ./...

@@ -1,0 +1,47 @@
+# ISC License
+#
+# Copyright (c) 2026 Shane & Contributors
+#
+# Permission to use, copy, modify, and/or distribute this software for any
+# purpose with or without fee is hereby granted, provided that the above
+# copyright notice and this permission notice appear in all copies.
+#
+# THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
+# WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
+# MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
+# ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+# WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
+# ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
+# OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+name: Docker Build
+# The action runs as a Docker container action (action.yml -> Dockerfile), but
+# nothing else in CI builds that image, so a broken Dockerfile only surfaces when
+# the action is actually invoked. `uses: ./` builds the image from this checkout
+# and then runs it with dry-run: true against the shared Bugs5382/.github config
+# (the same extends pin job-release-drafter.yaml uses), the integration check: a
+# Dockerfile regression, a bad flag, a config.Load path or a GraphQL query fails
+# the PR even though every package's own tests passed.
+#
+# Pull requests only, and not while the PR is a draft. There is no push trigger:
+# the PR run already built the tree being merged.
+on:
+  pull_request:
+    branches:
+      - main
+    types: [opened, synchronize, reopened, ready_for_review]
+permissions:
+  contents: read
+jobs:
+  docker:
+    name: 🐳 Action image builds
+    if: github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Build and run the action against this checkout (dry run)
+        uses: ./
+        with:
+          extends: Bugs5382/.github@main
+          dry-run: true

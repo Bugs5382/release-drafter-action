@@ -1,0 +1,75 @@
+version: '3'
+vars:
+  ARTIFACT_NAME: release-drafter-action
+  TESTPARALLELISM: 4
+  GOLIC_VERSION: v0.3.0
+  GOLANGCI_VERSION: v2.12.2
+  VERSION: "local"
+  GITSHA:
+    sh: git rev-parse --short HEAD 2>/dev/null || echo "unknown"
+  COMMON_LIC: "2026 Shane & Contributors"
+  TEMPLATE_LIC: "isc"
+tasks:
+  default:
+    cmds:
+      - task: lint
+  fmt:
+    desc: Format Go sources
+    cmds:
+      - gofmt -w .
+      - goimports -w ./
+  build:
+    desc: Build all packages
+    cmds:
+      - go build ./...
+  build:action:
+    desc: Build the action binary into bin/
+    cmds:
+      - |
+        CGO_ENABLED=0 go build -trimpath \
+        -ldflags "-X 'main.Version={{.VERSION}}' -X 'main.Gitsha={{.GITSHA}}'" \
+        -o bin/{{.ARTIFACT_NAME}} ./cmd/action
+  run:
+    desc: Run the action locally with trace-level console logs (pass flags after --)
+    env:
+      LOG_LEVEL: trace
+      LOG_FORMAT: console
+    cmds:
+      - go run ./cmd/action {{.CLI_ARGS}}
+  docker:
+    desc: Build the action image the way GitHub Actions does
+    cmds:
+      - docker build -t {{.ARTIFACT_NAME}}:local .
+  test:
+    desc: Run tests
+    cmds:
+      - go test -parallel {{.TESTPARALLELISM}} ./...
+  test-cover:
+    desc: Run tests with coverage reporting
+    cmds:
+      - go test ./... -cover
+  lint:
+    desc: Run all linters
+    deps: [test]
+    cmds:
+      - |
+        unformatted="$(gofmt -l .)"
+        if [ -n "$unformatted" ]; then echo "gofmt needed on:"; echo "$unformatted"; exit 1; fi
+      - golangci-lint run
+      - yamllint .
+  lint-init:
+    desc: Install lint dependencies (golangci-lint is built with the local Go toolchain)
+    cmds:
+      - brew install gitleaks yamllint
+      - go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@{{.GOLANGCI_VERSION}}
+      - go install golang.org/x/tools/cmd/goimports@latest
+  license:
+    desc: Verify every source file carries the ISC license header (CI; never writes).
+    cmds:
+      - go install github.com/Bugs5382/golic/cmd/golic@{{.GOLIC_VERSION}}
+      - golic inject -t {{.TEMPLATE_LIC}} -c "{{.COMMON_LIC}}" --dry -x
+  license:fix:
+    desc: Inject the ISC header into any source file missing it.
+    cmds:
+      - go install github.com/Bugs5382/golic/cmd/golic@{{.GOLIC_VERSION}}
+      - golic inject -t {{.TEMPLATE_LIC}} -c "{{.COMMON_LIC}}"

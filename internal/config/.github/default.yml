@@ -1,0 +1,111 @@
+# Emoji below are written as double-quoted YAML \U/\u escapes, not as literal
+# emoji bytes: the repository's PR hygiene check forbids emoji outside the
+# root .github directory, and this file lives under internal/config/.github.
+#
+# Built-in default config for release-drafter-action. The action uses it when
+# the config input, extends and the local .github/<config-name> file are all
+# absent. It is also a sound starting point for a shared config: copy it,
+# publish it as a release asset and point extends at it.
+#
+# Pull request titles follow Conventional Commits. The autolabeler turns a
+# title's type into a label. Most categories match that label or the title
+# itself, so the notes stay grouped when the autolabeler never ran. The
+# categories' semver-increment picks the version: breaking is major, features
+# are minor, everything else is patch. That replaces v7's version-resolver
+# block, which v7.7 deprecates, so the default logs no deprecation warnings.
+name-template: 'v$RESOLVED_VERSION'
+tag-template: 'v$RESOLVED_VERSION'
+template: |
+  ## What's Changed
+
+  $CHANGES
+
+  ## Contributors
+
+  $CONTRIBUTORS
+
+  **Full Changelog**: https://github.com/$OWNER/$REPOSITORY/compare/$PREVIOUS_TAG...v$RESOLVED_VERSION
+category-template: '### $TITLE'
+change-template: '- $TITLE @$AUTHOR (#$NUMBER)'
+change-title-escapes: '\<*_&'
+categories:
+  - type: pre-exclude
+    when:
+      - labels: [skip-changelog]
+      - conventional:
+          types: [ci, test, style]
+  # Exclusive, so a breaking change is listed here and nowhere else.
+  - title: "\U0001F4A5 Breaking Changes"
+    semver-increment: major
+    exclusive: true
+    when:
+      - labels: [breaking]
+      - conventional:
+          breaking: true
+  - title: "\U0001F680 Features"
+    semver-increment: minor
+    when:
+      - labels: [enhancement]
+      - conventional:
+          type: feat
+  # Labels only: Renovate titles dependency updates fix(deps), and those
+  # belong under Dependency Updates. The autolabeler's fix rule skips them.
+  - title: "\U0001F41B Bug Fixes"
+    when:
+      - labels: [bug, fix]
+  - title: "\u26A1 Performance"
+    when:
+      - labels: [performance]
+      - conventional:
+          type: perf
+  - title: "\u267B\uFE0F Refactoring"
+    when:
+      - labels: [refactor]
+      - conventional:
+          type: refactor
+  - title: "\U0001F510 Security"
+    when:
+      - labels: [security]
+      - conventional:
+          type: security
+  - title: "\U0001F4C4 Documentation"
+    when:
+      - labels: [documentation]
+      - conventional:
+          type: docs
+  - title: "\U0001F9E9 Dependency Updates"
+    collapse-after: 5
+    when:
+      - labels: [dependencies]
+      - conventional:
+          types: [build, chore, fix]
+          scopes: [deps, deps-dev]
+# Bot authors render as @[name[bot]](url) in change lines and as
+# [@name[bot]](url) in $CONTRIBUTORS. Both become a plain [@name](url) link.
+replacers:
+  - search: '/@?\[@?([\w.-]+)\[bot\]\]\(/g'
+    replace: '[@$1]('
+autolabeler:
+  - label: breaking
+    title: ['/^[a-z]+(\(.+\))?!:/']
+    body: ['/^BREAKING[ -]CHANGE:/m']
+  - label: enhancement
+    title: ['/^feat(\(.+\))?:/']
+  - label: fix
+    title: ['/^fix(?!\(deps)(\(.+\))?:/']
+  - label: performance
+    title: ['/^perf(\(.+\))?:/']
+  - label: refactor
+    title: ['/^refactor(\(.+\))?:/']
+  - label: documentation
+    title: ['/^docs(\(.+\))?:/']
+  - label: security
+    title: ['/^security(\(.+\))?:/']
+  # Dependabot and Renovate: their branch prefix, or a deps-scoped title.
+  - label: dependencies
+    branch: ['/^dependabot\//', '/^renovate\//']
+    title: ['/^(build|chore|fix)\(deps(-dev)?\):/']
+  - label: skip-changelog
+    title:
+      - '/^(ci|test|style)(\(.+\))?:/'
+      - '/^(build|chore)(?!\(deps)(\(.+\))?:/'

@@ -1,0 +1,159 @@
+# ISC License
+#
+# Copyright (c) 2026 Shane & Contributors
+#
+# Permission to use, copy, modify, and/or distribute this software for any
+# purpose with or without fee is hereby granted, provided that the above
+# copyright notice and this permission notice appear in all copies.
+#
+# THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
+# WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
+# MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
+# ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+# WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
+# ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
+# OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+name: 'Release Drafter Action'
+description: 'Drafts release notes from merged pull requests: release-drafter v7 in Go, with config as an input and a clean first release'
+branding:
+  icon: 'edit-3'
+  color: 'yellow'
+
+author: Bugs5382
+
+inputs:
+  config:
+    required: false
+    description: The release-drafter configuration as YAML text, for example an org variable (vars.RELEASE_DRAFTER_CONFIG). Takes precedence over config-name. Accepts every release-drafter v7 key except _extends.
+    default: ''
+  config-name:
+    required: false
+    description: Config file under .github on the checked-out ref, used when config is empty. Unlike v7, the ref does not have to be the default branch.
+    default: 'release-drafter.yml'
+  extends:
+    required: false
+    description: Shared config to load when config is empty, as owner/repo@ref. A tag with a matching release asset is downloaded and digest-verified; any other ref (a branch, a SHA, or a tag with no matching asset) reads .github/<extends-asset> from that repository at that ref instead, with no digest to check. A branch (or an unpinned tag) follows every change to it; pin a tag or a full SHA for stability. Takes precedence over config-name.
+    default: ''
+  extends-asset:
+    required: false
+    description: Release asset name extends downloads at a pinned tag, or the file name read from .github/ at any other ref. Defaults to release-drafter.yml.
+    default: ''
+  exclude-bots:
+    required: false
+    description: Drop pull requests opened by a bot account before drafting. Only applies to the built-in default config (no config, extends or config-name file); ignored otherwise. Defaults to false.
+    default: ''
+  token:
+    required: false
+    description: Token used for GitHub API requests. Needs contents write to draft releases and pull-requests write to autolabel. Defaults to github.token.
+    default: ${{ github.token }}
+  name:
+    required: false
+    description: Name of the release that is created or updated. Overrides name-template in the config.
+    default: ''
+  tag:
+    required: false
+    description: Tag name of the release that is created or updated. Overrides tag-template in the config.
+    default: ''
+  version:
+    required: false
+    description: Version of the release that is created or updated. Overrides the version resolved from labels.
+    default: ''
+  publish:
+    required: false
+    description: Publish the release immediately instead of leaving it as a draft. Defaults to false.
+    default: ''
+  latest:
+    required: false
+    description: Mark the release that is created or updated as the latest release.
+    default: ''
+  prerelease:
+    required: false
+    description: Draft a prerelease, with the changes since the previous prerelease when there is one. Defaults to false.
+    default: ''
+  prerelease-identifier:
+    required: false
+    description: Identifier used to increment the prerelease version (alpha, beta, rc and so on). Turns on prerelease when both come from the same config location; explicit inputs still win.
+    default: ''
+  include-pre-releases:
+    required: false
+    description: Include prereleases when looking for the last published release. Has no effect when prerelease is true. Defaults to false.
+    default: ''
+  commitish:
+    required: false
+    description: Release target, a branch, commit SHA, or fully qualified tag or pull request ref. Defaults to the branch the workflow runs for.
+    default: ''
+  header:
+    required: false
+    description: Text added before the rendered body.
+    default: ''
+  footer:
+    required: false
+    description: Text added after the rendered body.
+    default: ''
+  filter-by-range:
+    required: false
+    description: Semver range the last release must satisfy to count as the previous release.
+    default: ''
+  since:
+    required: false
+    description: Start point for a first release, as a tag, commit SHA or date. Without it a first release covers every merged pull request reachable from the target commit.
+    default: ''
+  first-version:
+    required: false
+    description: Resolved version used for a first release (no earlier published release and no version/tag/name override), instead of incrementing from 0.0.0. This action's own fix for release-drafter's first-release gap (release-drafter/release-drafter#1630).
+    default: '1.0.0'
+  dry-run:
+    required: false
+    description: Make no API writes. Prints the rendered body and the outputs that would be set. Defaults to false.
+    default: ''
+
+outputs:
+  id:
+    description: ID of the release that was created or updated.
+  name:
+    description: Name of the release.
+  tag_name:
+    description: Tag name associated with the release.
+  body:
+    description: Body of the drafted release.
+  html_url:
+    description: URL of the release page.
+  upload_url:
+    description: URL for uploading assets to the release.
+  resolved_version:
+    description: Next version, resolved from the pull request labels.
+  major_version:
+    description: Next major version. After v1.2.3 this is v2.0.0.
+  minor_version:
+    description: Next minor version. After v1.2.3 this is v1.3.0.
+  patch_version:
+    description: Next patch version. After v1.2.3 this is v1.2.4.
+
+runs:
+  using: 'docker'
+  image: 'Dockerfile'
+  env:
+    # The token goes in through the environment, not a flag, so it never shows
+    # on the container command line.
+    GITHUB_TOKEN: ${{ inputs.token }}
+  args:
+    - --config=${{ inputs.config }}
+    - --config-name=${{ inputs.config-name }}
+    - --extends=${{ inputs.extends }}
+    - --extends-asset=${{ inputs.extends-asset }}
+    - --exclude-bots=${{ inputs.exclude-bots }}
+    - --name=${{ inputs.name }}
+    - --tag=${{ inputs.tag }}
+    - --version=${{ inputs.version }}
+    - --publish=${{ inputs.publish }}
+    - --latest=${{ inputs.latest }}
+    - --prerelease=${{ inputs.prerelease }}
+    - --prerelease-identifier=${{ inputs.prerelease-identifier }}
+    - --include-pre-releases=${{ inputs.include-pre-releases }}
+    - --commitish=${{ inputs.commitish }}
+    - --header=${{ inputs.header }}
+    - --footer=${{ inputs.footer }}
+    - --filter-by-range=${{ inputs.filter-by-range }}
+    - --since=${{ inputs.since }}
+    - --first-version=${{ inputs.first-version }}
+    - --dry-run=${{ inputs.dry-run }}

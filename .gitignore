@@ -1,0 +1,14 @@
+/bin/
+*.test
+*.out
+coverage.*
+
+# local design notes - never committed
+plan/
+
+.DS_Store
+.idea/
+.vscode/
+
+# local environment - copy .env.example to .env
+.env

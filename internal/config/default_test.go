@@ -84,6 +84,18 @@ func TestBuiltinDefaultParsesAndMerges(t *testing.T) {
 	if cfg.ChangeTemplate != "- $TITLE @$AUTHOR (#$NUMBER)" || cfg.CategoryTemplate != "### $TITLE" || len(cfg.ExcludeLabels) != 0 {
 		t.Errorf("change-template %q, category-template %q, exclude-labels %q", cfg.ChangeTemplate, cfg.CategoryTemplate, cfg.ExcludeLabels)
 	}
+	// The "Contributors" section lists only first-time contributors, the
+	// same as upstream release-drafter's own default and GitHub's native
+	// release notes: a roster of every contributor to the release (every
+	// author with a merged pull request in range, whether or not it is
+	// their first) is a different thing release-drafter calls $CONTRIBUTORS,
+	// and is not what the built-in default renders.
+	if !strings.Contains(cfg.Template, "$NEW_CONTRIBUTORS") {
+		t.Errorf("template must render $NEW_CONTRIBUTORS: %q", cfg.Template)
+	}
+	if strings.Contains(cfg.Template, "$CONTRIBUTORS") {
+		t.Errorf("template must not render the full-roster $CONTRIBUTORS: %q", cfg.Template)
+	}
 	p, err := Merge(cfg, Inputs{}, "refs/heads/main")
 	if err != nil {
 		t.Fatal(err)

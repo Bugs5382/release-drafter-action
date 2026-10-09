@@ -204,3 +204,45 @@ func TestBuildExcludesBotsWhenConfigured(t *testing.T) {
 		t.Errorf("resolved_version = %q, want 1.0.1 (the bot's major-bump dependency change never reaches the Deps category)", got.ResolvedVersion)
 	}
 }
+
+// TestBuildBuiltinDefaultListsOnlyNewContributors pins issue #7: the
+// built-in default's "## New Contributors" section calls out only the
+// authors making their first contribution, the same as upstream
+// release-drafter's own default, not a roster of every author with a
+// merged pull request in the release.
+func TestBuildBuiltinDefaultListsOnlyNewContributors(t *testing.T) {
+	cfg, err := config.BuiltinDefault(false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, err := config.Merge(cfg, config.Inputs{}, "refs/heads/main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	prs := []model.PullRequest{
+		{Number: 1, Title: "feat: add the first endpoint", Merged: true, BaseRepository: "o/r",
+			Author: &model.Actor{Typename: "User", Login: "alice"}, Labels: []string{"enhancement"}},
+		{Number: 2, Title: "fix: handle empty input", Merged: true, BaseRepository: "o/r",
+			Author: &model.Actor{Typename: "User", Login: "bob"}, Labels: []string{"bug"}},
+	}
+	got, err := Build(BuildInput{
+		Parsed: p, LastRelease: &model.Release{TagName: "v1.0.0"}, PullRequests: prs,
+		NewContributors: map[string]bool{"alice": true}, Owner: "o", Repo: "r", ServerURL: "https://github.com",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(got.Body, "## New Contributors") {
+		t.Errorf("body missing the New Contributors heading: %q", got.Body)
+	}
+	if !strings.Contains(got.Body, "@alice made their first contribution in #1") {
+		t.Errorf("body missing alice's first-contribution line: %q", got.Body)
+	}
+	newSection := got.Body[strings.Index(got.Body, "## New Contributors"):]
+	if strings.Contains(newSection, "@bob") {
+		t.Errorf("New Contributors section calls out bob, who is not a new contributor: %q", newSection)
+	}
+	if strings.Contains(got.Body, "## Contributors\n") {
+		t.Errorf("body still carries the full-roster Contributors heading: %q", got.Body)
+	}
+}

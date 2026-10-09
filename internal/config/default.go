@@ -43,7 +43,7 @@ func DefaultText() []byte { return slices.Clone(defaultYAML) }
 
 // BuiltinDefault parses the built-in default config. With excludeBots, pull
 // requests opened by bots are dropped before rendering (ExcludeBots) and the
-// bot accounts are left out of $CONTRIBUTORS (exclude-contributors).
+// bot accounts are left out of $NEW_CONTRIBUTORS (exclude-contributors).
 func BuiltinDefault(excludeBots bool) (*Config, error) {
 	cfg, err := Parse(defaultYAML, DefaultOrigin)
 	if err != nil {

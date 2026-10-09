@@ -20,9 +20,9 @@ template: |
 
   $CHANGES
 
-  ## Contributors
+  ## New Contributors
 
-  $CONTRIBUTORS
+  $NEW_CONTRIBUTORS
 
   **Full Changelog**: https://github.com/$OWNER/$REPOSITORY/compare/$PREVIOUS_TAG...v$RESOLVED_VERSION
 category-template: '### $TITLE'

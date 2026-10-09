@@ -95,6 +95,96 @@ func TestGetVersionInfoRejectsAnUnparsableFirstVersion(t *testing.T) {
 	}
 }
 
+// TestGetVersionInfoFirstReleaseRCFlow covers the rc flow a brand-new
+// repo runs through: a first release drafted with prerelease on seeds
+// "<first-version>-<identifier>.1" instead of dropping the prerelease
+// (issue #4); a later draft computed against a published rc release keeps
+// bumping the prerelease count; and promoting to stable (prerelease off,
+// whether or not include-pre-releases finds that rc as the last release)
+// drops the prerelease suffix without a spurious major/minor/patch bump,
+// the same way node-semver resolves "patch"/"minor" against a version
+// that already carries a prerelease.
+func TestGetVersionInfoFirstReleaseRCFlow(t *testing.T) {
+	rcCfg := config.Defaults()
+	rcCfg.PrereleaseIdentifier = "rc"
+
+	cases := []struct {
+		name      string
+		last      *model.Release
+		in        VersionInput
+		increment string
+		want      string
+		wantPre   string
+	}{
+		{
+			name:      "first release seeds rc.1",
+			last:      nil,
+			in:        VersionInput{FirstVersion: "0.1.0"},
+			increment: "preminor",
+			want:      "0.1.0-rc.1",
+			wantPre:   "-rc.1",
+		},
+		{
+			name:      "next draft bumps the published rc",
+			last:      &model.Release{TagName: "v0.1.0-rc.1"},
+			in:        VersionInput{},
+			increment: "preminor",
+			want:      "0.1.0-rc.2",
+			wantPre:   "-rc.2",
+		},
+		{
+			name:      "promoting drops the prerelease without bumping",
+			last:      &model.Release{TagName: "v0.1.0-rc.1"},
+			in:        VersionInput{},
+			increment: "minor",
+			want:      "0.1.0",
+			wantPre:   "",
+		},
+	}
+	for _, c := range cases {
+		vars, err := GetVersionInfo(c.last, rcCfg, c.in, c.increment)
+		if err != nil {
+			t.Fatalf("%s: %v", c.name, err)
+		}
+		if got := vars["$RESOLVED_VERSION"]; got != c.want {
+			t.Errorf("%s: $RESOLVED_VERSION = %q, want %q", c.name, got, c.want)
+		}
+		if got := vars["$RESOLVED_VERSION_PRERELEASE"]; got != c.wantPre {
+			t.Errorf("%s: $RESOLVED_VERSION_PRERELEASE = %q, want %q", c.name, got, c.wantPre)
+		}
+	}
+}
+
+// TestGetVersionInfoFirstReleaseWithoutIdentifierKeepsPlainFirstVersion
+// pins that prerelease alone, with no prerelease-identifier, never seeds a
+// prerelease on a first release: ResolveIncrement never asks for one
+// (p.Config.PrereleaseIdentifier == "" keeps the plain key), so the
+// existing "pinned to first-version exactly" behavior is unchanged.
+func TestGetVersionInfoFirstReleaseWithoutIdentifierKeepsPlainFirstVersion(t *testing.T) {
+	vars, err := GetVersionInfo(nil, config.Defaults(), VersionInput{FirstVersion: "0.1.0"}, "minor")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := vars["$RESOLVED_VERSION"]; got != "0.1.0" {
+		t.Errorf("$RESOLVED_VERSION = %q, want %q", got, "0.1.0")
+	}
+}
+
+// TestRenderNameOrTagKeepsTheRCSuffix pins that a custom tag-template (or
+// name-template) built around $RESOLVED_VERSION carries the prerelease
+// suffix through untouched, the same as any other resolved version.
+func TestRenderNameOrTagKeepsTheRCSuffix(t *testing.T) {
+	rcCfg := config.Defaults()
+	rcCfg.PrereleaseIdentifier = "rc"
+	vars, err := GetVersionInfo(nil, rcCfg, VersionInput{FirstVersion: "0.1.0"}, "preminor")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := RenderNameOrTag(nil, "v$RESOLVED_VERSION", vars); got != "v0.1.0-rc.1" {
+		t.Errorf("tag-template = %q, want %q", got, "v0.1.0-rc.1")
+	}
+}
+
 func TestResolveIncrement(t *testing.T) {
 	data := "categories:\n  - title: Features\n    semver-increment: minor\n    labels: [feature]\n  - title: Other\n    semver-increment: patch\n" +
 		"version-resolver:\n  major:\n    labels: [breaking]\n"

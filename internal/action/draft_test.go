@@ -183,6 +183,267 @@ func TestRunDraftCreatesReleaseAndWritesOutputs(t *testing.T) {
 	}
 }
 
+// comparisonCommitsResponse builds a findCommitsInComparison response (the
+// query CollectCommits issues when a last release is found) out of the same
+// per-commit node shape firstReleaseCommitNodeWithLabels builds for
+// findCommitsSince.
+func comparisonCommitsResponse(t *testing.T, nodes []map[string]any) []byte {
+	return graphQLEnvelope(t, map[string]any{
+		"repository": map[string]any{
+			"ref": map[string]any{
+				"compare": map[string]any{
+					"commits": map[string]any{
+						"pageInfo": map[string]any{"hasNextPage": false, "endCursor": ""},
+						"nodes":    nodes,
+					},
+				},
+			},
+		},
+	})
+}
+
+// TestRunDraftFirstReleaseWithPrereleaseDraftsRCOne covers issue #4: a
+// brand-new repo's very first draft, with prerelease on and a
+// prerelease-identifier, must come out as "<first-version>-<identifier>.1"
+// rather than dropping the prerelease (the first-release path used to force
+// "no_increment" unconditionally). This is the state Sneakers-PAM's first
+// release starts from: first-version 0.1.0, prerelease true, identifier rc.
+func TestRunDraftFirstReleaseWithPrereleaseDraftsRCOne(t *testing.T) {
+	const cfg = "template: \"$CHANGES\"\n" +
+		"change-template: '- $TITLE (#$NUMBER)'\n" +
+		"name-template: 'v$RESOLVED_VERSION'\n" +
+		"tag-template: 'v$RESOLVED_VERSION'\n"
+
+	featOID := fmt.Sprintf("%040x", 301)
+	fixOID := fmt.Sprintf("%040x", 302)
+
+	f := newFakeGitHub(t)
+	f.releases = []byte("[]")
+	f.graphQL = func(query string, _ map[string]any) []byte {
+		switch {
+		case strings.Contains(query, "findCommitsSince"):
+			return graphQLEnvelope(t, map[string]any{
+				"repository": map[string]any{
+					"object": map[string]any{
+						"history": map[string]any{
+							"pageInfo": map[string]any{"hasNextPage": false, "endCursor": ""},
+							"nodes": []any{
+								firstReleaseCommitNode(fixOID, 302, "fix: handle empty input", "2026-03-02T00:00:00Z"),
+								firstReleaseCommitNode(featOID, 301, "feat: add the first endpoint", "2026-03-01T00:00:00Z"),
+							},
+						},
+					},
+				},
+			})
+		case strings.Contains(query, "findRecentMergedPullRequests"):
+			return emptyRecentMergedResponse(t)
+		}
+		t.Fatalf("unexpected graphql query: %s", query)
+		return nil
+	}
+	var created []byte
+	f.createRelease = func(body []byte) []byte {
+		created = body
+		return mustJSON(t, map[string]any{
+			"id": 1, "tag_name": "v0.1.0-rc.1", "name": "v0.1.0-rc.1", "draft": true, "prerelease": true,
+			"target_commitish": "refs/heads/main", "created_at": "2026-03-02T00:00:00Z",
+			"html_url":   "https://github.com/o/r/releases/tag/v0.1.0-rc.1",
+			"upload_url": "https://uploads.github.com/repos/o/r/releases/1/assets",
+		})
+	}
+	f.updateRelease = func(id string, body []byte) []byte {
+		t.Fatalf("a first release must create, not update; id %s, body: %s", id, body)
+		return nil
+	}
+
+	outPath := filepath.Join(t.TempDir(), "output")
+	var stdout bytes.Buffer
+	code := Run(context.Background(), Options{
+		Flags: Flags{Config: cfg, FirstVersion: "0.1.0", Prerelease: "true", PrereleaseIdentifier: "rc"},
+		Env: Env{
+			EventName: "push", Token: "test-token", Repository: "o/r", Ref: "refs/heads/main",
+			ServerURL: "https://github.com", APIURL: f.srv.URL, GraphQLURL: f.srv.URL + "/graphql",
+			OutputPath: outPath,
+		},
+		Stdout: &stdout,
+	})
+	if code != 0 {
+		t.Fatalf("Run = %d, want 0; stdout: %s", code, stdout.String())
+	}
+	if created == nil {
+		t.Fatal("CreateRelease was never called")
+	}
+	body := string(created)
+	for _, want := range []string{`"tag_name":"v0.1.0-rc.1"`, `"name":"v0.1.0-rc.1"`, `"prerelease":true`, `"draft":true`} {
+		if !strings.Contains(body, want) {
+			t.Errorf("create body missing %q: %s", want, body)
+		}
+	}
+	for _, want := range []string{"feat: add the first endpoint (#301)", "fix: handle empty input (#302)"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("create body missing the merged pull request %q: %s", want, body)
+		}
+	}
+	for _, banner := range []string{"could not find a previous published release", "No changes"} {
+		if strings.Contains(body, banner) {
+			t.Errorf("create body carries the no-previous-release banner %q: %s", banner, body)
+		}
+	}
+}
+
+// TestRunDraftNextRCBumpsFromPublished covers rc.2: a published v0.1.0-rc.1
+// release exists, so FindPreviousReleases finds it as the last release
+// (prerelease: true keeps a prerelease in that search), and the next draft
+// keeps the same major.minor.patch, bumps the prerelease count to rc.2 and
+// renders only the pull request merged since rc.1.
+func TestRunDraftNextRCBumpsFromPublished(t *testing.T) {
+	const cfg = "template: \"$CHANGES\"\n" +
+		"change-template: '- $TITLE (#$NUMBER)'\n" +
+		"name-template: 'v$RESOLVED_VERSION'\n" +
+		"tag-template: 'v$RESOLVED_VERSION'\n"
+
+	oid := fmt.Sprintf("%040x", 303)
+
+	f := newFakeGitHub(t)
+	f.releases = mustJSON(t, []map[string]any{{
+		"id": 1, "tag_name": "v0.1.0-rc.1", "name": "v0.1.0-rc.1", "draft": false, "prerelease": true,
+		"target_commitish": "refs/heads/main", "created_at": "2026-03-02T00:00:00Z",
+		"html_url":   "https://github.com/o/r/releases/tag/v0.1.0-rc.1",
+		"upload_url": "https://uploads.github.com/repos/o/r/releases/1/assets",
+	}})
+	var sawBaseRef string
+	f.graphQL = func(query string, vars map[string]any) []byte {
+		switch {
+		case strings.Contains(query, "findCommitsInComparison"):
+			if baseRef, ok := vars["baseRef"].(string); ok {
+				sawBaseRef = baseRef
+			}
+			return comparisonCommitsResponse(t, []map[string]any{
+				firstReleaseCommitNodeWithLabels(oid, 303, "fix: tighten validation", "2026-03-03T00:00:00Z", nil),
+			})
+		case strings.Contains(query, "findRecentMergedPullRequests"):
+			return emptyRecentMergedResponse(t)
+		}
+		t.Fatalf("unexpected graphql query: %s", query)
+		return nil
+	}
+	var created []byte
+	f.createRelease = func(body []byte) []byte {
+		created = body
+		return mustJSON(t, map[string]any{
+			"id": 2, "tag_name": "v0.1.0-rc.2", "name": "v0.1.0-rc.2", "draft": true, "prerelease": true,
+			"target_commitish": "refs/heads/main", "created_at": "2026-03-03T00:00:00Z",
+			"html_url":   "https://github.com/o/r/releases/tag/v0.1.0-rc.2",
+			"upload_url": "https://uploads.github.com/repos/o/r/releases/2/assets",
+		})
+	}
+
+	outPath := filepath.Join(t.TempDir(), "output")
+	var stdout bytes.Buffer
+	code := Run(context.Background(), Options{
+		Flags: Flags{Config: cfg, Prerelease: "true", PrereleaseIdentifier: "rc"},
+		Env: Env{
+			EventName: "push", Token: "test-token", Repository: "o/r", Ref: "refs/heads/main",
+			ServerURL: "https://github.com", APIURL: f.srv.URL, GraphQLURL: f.srv.URL + "/graphql",
+			OutputPath: outPath,
+		},
+		Stdout: &stdout,
+	})
+	if code != 0 {
+		t.Fatalf("Run = %d, want 0; stdout: %s", code, stdout.String())
+	}
+	if sawBaseRef != "refs/tags/v0.1.0-rc.1" {
+		t.Errorf("findCommitsInComparison baseRef = %q, want %q", sawBaseRef, "refs/tags/v0.1.0-rc.1")
+	}
+	if created == nil {
+		t.Fatal("CreateRelease was never called")
+	}
+	body := string(created)
+	if !strings.Contains(body, `"tag_name":"v0.1.0-rc.2"`) {
+		t.Errorf("create body did not bump to rc.2: %s", body)
+	}
+	if !strings.Contains(body, "fix: tighten validation (#303)") {
+		t.Errorf("create body missing the pull request merged since rc.1: %s", body)
+	}
+}
+
+// TestRunDraftPromotingDropsThePrerelease covers stabilizing: prerelease off
+// with include-pre-releases on still finds the published v0.1.0-rc.1 as the
+// last release (so the resolver has something to anchor to), and the
+// promoted draft is v0.1.0 exactly -- the prerelease dropped, not a fresh
+// major/minor/patch bump on top of it -- matching node-semver's own
+// patch/minor/major-on-a-prerelease behavior.
+func TestRunDraftPromotingDropsThePrerelease(t *testing.T) {
+	const cfg = "template: \"$CHANGES\"\n" +
+		"change-template: '- $TITLE (#$NUMBER)'\n" +
+		"name-template: 'v$RESOLVED_VERSION'\n" +
+		"tag-template: 'v$RESOLVED_VERSION'\n" +
+		"version-resolver:\n  minor:\n    labels: [enhancement]\n  default: patch\n"
+
+	oid := fmt.Sprintf("%040x", 304)
+
+	f := newFakeGitHub(t)
+	f.releases = mustJSON(t, []map[string]any{{
+		"id": 1, "tag_name": "v0.1.0-rc.1", "name": "v0.1.0-rc.1", "draft": false, "prerelease": true,
+		"target_commitish": "refs/heads/main", "created_at": "2026-03-02T00:00:00Z",
+		"html_url":   "https://github.com/o/r/releases/tag/v0.1.0-rc.1",
+		"upload_url": "https://uploads.github.com/repos/o/r/releases/1/assets",
+	}})
+	f.graphQL = func(query string, _ map[string]any) []byte {
+		switch {
+		case strings.Contains(query, "findCommitsInComparison"):
+			return comparisonCommitsResponse(t, []map[string]any{
+				firstReleaseCommitNodeWithLabels(oid, 304, "feat: add the second endpoint", "2026-03-04T00:00:00Z", []string{"enhancement"}),
+			})
+		case strings.Contains(query, "findRecentMergedPullRequests"):
+			return emptyRecentMergedResponse(t)
+		}
+		t.Fatalf("unexpected graphql query: %s", query)
+		return nil
+	}
+	var created []byte
+	f.createRelease = func(body []byte) []byte {
+		created = body
+		return mustJSON(t, map[string]any{
+			"id": 3, "tag_name": "v0.1.0", "name": "v0.1.0", "draft": true, "prerelease": false,
+			"target_commitish": "refs/heads/main", "created_at": "2026-03-04T00:00:00Z",
+			"html_url":   "https://github.com/o/r/releases/tag/v0.1.0",
+			"upload_url": "https://uploads.github.com/repos/o/r/releases/3/assets",
+		})
+	}
+
+	outPath := filepath.Join(t.TempDir(), "output")
+	var stdout bytes.Buffer
+	code := Run(context.Background(), Options{
+		Flags: Flags{Config: cfg, IncludePreReleases: "true"},
+		Env: Env{
+			EventName: "push", Token: "test-token", Repository: "o/r", Ref: "refs/heads/main",
+			ServerURL: "https://github.com", APIURL: f.srv.URL, GraphQLURL: f.srv.URL + "/graphql",
+			OutputPath: outPath,
+		},
+		Stdout: &stdout,
+	})
+	if code != 0 {
+		t.Fatalf("Run = %d, want 0; stdout: %s", code, stdout.String())
+	}
+	if created == nil {
+		t.Fatal("CreateRelease was never called")
+	}
+	body := string(created)
+	if !strings.Contains(body, `"tag_name":"v0.1.0"`) {
+		t.Errorf("create body did not promote to the plain v0.1.0: %s", body)
+	}
+	if strings.Contains(body, `"tag_name":"v0.1.1"`) || strings.Contains(body, `"tag_name":"v0.2.0"`) {
+		t.Errorf("create body bumped past the published rc instead of just dropping the prerelease: %s", body)
+	}
+	if !strings.Contains(body, `"prerelease":false`) {
+		t.Errorf("create body still marked prerelease: %s", body)
+	}
+	if !strings.Contains(body, "feat: add the second endpoint (#304)") {
+		t.Errorf("create body missing the pull request merged since the rc: %s", body)
+	}
+}
+
 func firstReleaseCommitNode(oid string, number int, title, merged string) map[string]any {
 	return firstReleaseCommitNodeWithLabels(oid, number, title, merged, nil)
 }

@@ -184,7 +184,11 @@ type VersionInput struct {
 	// 0.0.0 fallback: this action's own fix for release-drafter's
 	// first-release gap (release-drafter/release-drafter#1630), which left
 	// a first release drifting to whatever 0.0.0 plus the highest matched
-	// category happens to resolve to. Empty keeps the 0.0.0 fallback.
+	// category happens to resolve to. Empty keeps the 0.0.0 fallback. When
+	// the resolved increment also asks for a prerelease (prerelease on,
+	// with a prerelease-identifier), the first draft is
+	// "<first-version>-<identifier>.1" rather than FirstVersion unchanged,
+	// so a brand-new repo can run an rc flow from its very first release.
 	FirstVersion string
 }
 
@@ -219,6 +223,13 @@ func GetVersionInfo(last *model.Release, cfg config.Config, in VersionInput, inc
 	incoming := increment
 	var ref descriptor
 	var reference string
+	// firstPrerelease is set only on a first release (no input override, no
+	// last release) whose resolved increment asks for a prerelease: this
+	// action's own first-release design (see FirstVersion) seeds the
+	// prerelease count at 1 (v0.1.0-rc.1), not node-semver's usual -0, so
+	// the first draft reads as "release candidate one" and the next
+	// published prerelease's "prerelease" increment lands on rc.2.
+	firstPrerelease := false
 	switch {
 	case fromInput.v != nil:
 		increment = "no_increment"
@@ -239,6 +250,7 @@ func GetVersionInfo(last *model.Release, cfg config.Config, in VersionInput, inc
 		if v == nil {
 			return nil, fmt.Errorf("render: first-version %q does not parse as a version", in.FirstVersion)
 		}
+		firstPrerelease = strings.HasPrefix(increment, "pre") && base.identifier != ""
 		increment = "no_increment"
 		ref = descriptor{v: v, identifier: base.identifier, prefix: base.prefix}
 		reference = "first release"
@@ -277,6 +289,11 @@ func GetVersionInfo(last *model.Release, cfg config.Config, in VersionInput, inc
 		logging.L().Error().Str("version", resolved.v.String()).Str("increment", increment).Err(err).
 			Msg("render: failed to increment the version")
 		return nil, err
+	}
+	if firstPrerelease {
+		seeded := *resolved.v
+		seeded.Pre = []semver.PreID{{Str: base.identifier}, {IsNum: true, Num: 1}}
+		resolved = descriptor{v: &seeded, identifier: resolved.identifier, prefix: resolved.prefix}
 	}
 	major, minor, patch, rpre, _ := resolved.parts()
 	vars["$RESOLVED_VERSION"] = resolved.rendered(cfg.VersionTemplate)

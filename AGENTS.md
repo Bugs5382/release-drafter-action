@@ -47,7 +47,7 @@ Consumers call `uses: Bugs5382/release-drafter-action@v1`. The public surface is
 ## Layout
 
 - `action.yml` - action metadata: inputs, outputs, branding, Docker runtime and flag args.
-- `Dockerfile` - builds `./cmd/action` with `golang:1.26-alpine`, runs it on `alpine`.
+- `Dockerfile` - builds `./cmd/action` with a digest-pinned `golang:1.26-alpine`, runs it on `alpine`.
 - `cmd/action/` - entry point: flag parsing, reads the process environment, calls
   `internal/action.Run`, `os.Exit`s its result. Nothing here is tested beyond that glue; the
   actual behavior lives in `internal/action` and is tested there.

@@ -1,6 +1,6 @@
 module github.com/Bugs5382/release-drafter-action
 
-go 1.26.8
+go 1.26.9
 
 require (
 	github.com/Bugs5382/go-log v1.2.2

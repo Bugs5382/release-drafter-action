@@ -16,7 +16,7 @@
 
 # Build the binary from the source in this checkout so the action always runs
 # the code it ships with, the same as changelog-updater-action.
-FROM golang:1.26.9-alpine@sha256:cdfd4fe2da6b225d8b40c6b7a105736e548e83ff56d5d8f9394446eeb5eb84e0 AS build
+FROM golang:1.26.10-alpine@sha256:a2012b4a1d1f9f7e9f44e0d39b805a901e856b1dd80b4e6ee4338db547050308 AS build
 WORKDIR /src
 # go.sum is optional until the module has dependencies.
 COPY go.mod go.sum* ./

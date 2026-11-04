@@ -33,6 +33,7 @@ import (
 type RangeClient interface {
 	CommitsInRange(ctx context.Context, owner, repo, baseRef, headRef string, fields github.CommitFieldOptions) ([]model.Commit, error)
 	CommitsSince(ctx context.Context, owner, repo, target string, since *string, fields github.CommitFieldOptions) ([]model.Commit, error)
+	CommitsAfter(ctx context.Context, owner, repo, target, sinceOID string, fields github.CommitFieldOptions) ([]model.Commit, error)
 }
 
 // sha40 matches a full, bare commit SHA, the one case ParseSince treats as
@@ -90,6 +91,10 @@ func CollectCommits(ctx context.Context, client RangeClient, in RangeInput) ([]m
 
 	date, expression := ParseSince(in.Since)
 	switch {
+	case sha40.MatchString(expression):
+		logging.L().Info().Str("owner", in.Owner).Str("repo", in.Repo).Str("since", expression).Str("target", in.Commitish).
+			Msg("history: first release, walking history back to the since commit")
+		return client.CommitsAfter(ctx, in.Owner, in.Repo, in.Commitish, expression, in.Fields)
 	case expression != "":
 		logging.L().Info().Str("owner", in.Owner).Str("repo", in.Repo).Str("since", expression).Str("head_ref", in.Commitish).
 			Msg("history: first release, comparing against the since commitish")

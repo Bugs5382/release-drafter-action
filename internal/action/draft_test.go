@@ -553,3 +553,100 @@ func TestRunDraftFirstReleaseRewritesExistingDraftToFirstVersion(t *testing.T) {
 		t.Errorf("update body still carries the stale v0.1.0 tag: %s", updated)
 	}
 }
+
+// runFirstReleaseWithSince drafts a first release with the given since input
+// and returns the body sent to CreateRelease.
+func runFirstReleaseWithSince(t *testing.T, since string, graphQL func(query string, vars map[string]any) []byte) string {
+	t.Helper()
+	const cfg = "template: \"$CHANGES\\nprev=$PREVIOUS_TAG\"\n" +
+		"change-template: '- $TITLE (#$NUMBER)'\n" +
+		"name-template: 'v$RESOLVED_VERSION'\n" +
+		"tag-template: 'v$RESOLVED_VERSION'\n"
+	f := newFakeGitHub(t)
+	f.releases = []byte("[]")
+	f.graphQL = graphQL
+	var created []byte
+	f.createRelease = func(body []byte) []byte {
+		created = body
+		return mustJSON(t, map[string]any{
+			"id": 56, "tag_name": "v1.0.0", "name": "v1.0.0", "draft": true, "prerelease": false,
+			"target_commitish": "refs/heads/main", "created_at": "2026-04-02T00:00:00Z",
+			"html_url":   "https://github.com/o/r/releases/tag/v1.0.0",
+			"upload_url": "https://uploads.github.com/repos/o/r/releases/56/assets",
+		})
+	}
+	var stdout bytes.Buffer
+	code := Run(context.Background(), Options{
+		Flags: Flags{Config: cfg, Since: since},
+		Env: Env{
+			EventName: "push", Token: "test-token", Repository: "o/r", Ref: "refs/heads/main",
+			ServerURL: "https://github.com", APIURL: f.srv.URL, GraphQLURL: f.srv.URL + "/graphql",
+			OutputPath: filepath.Join(t.TempDir(), "output"),
+		},
+		Stdout: &stdout,
+	})
+	if code != 0 {
+		t.Fatalf("Run = %d, want 0; stdout: %s", code, stdout.String())
+	}
+	if created == nil {
+		t.Fatal("CreateRelease was never called")
+	}
+	return string(created)
+}
+
+// A SHA as since lists only the commits after it, and the first-release
+// compare link starts at that SHA.
+func TestRunDraftFirstReleaseSinceASHAListsWhatCameAfterItAndLinksFromIt(t *testing.T) {
+	since := fmt.Sprintf("%040x", 400)
+	newer, newest, older := fmt.Sprintf("%040x", 401), fmt.Sprintf("%040x", 402), fmt.Sprintf("%040x", 399)
+	body := runFirstReleaseWithSince(t, since, func(query string, _ map[string]any) []byte {
+		switch {
+		case strings.Contains(query, "findCommitsSince"):
+			return graphQLEnvelope(t, map[string]any{"repository": map[string]any{"object": map[string]any{"history": map[string]any{
+				"pageInfo": map[string]any{"hasNextPage": false, "endCursor": ""},
+				"nodes": []any{
+					firstReleaseCommitNode(newest, 402, "feat: the switch", "2026-04-02T00:00:00Z"),
+					firstReleaseCommitNode(newer, 401, "fix: a follow-up", "2026-04-01T00:00:00Z"),
+					firstReleaseCommitNode(since, 400, "chore: the last old commit", "2026-03-31T00:00:00Z"),
+					firstReleaseCommitNode(older, 399, "feat: an old feature", "2026-03-30T00:00:00Z"),
+				},
+			}}}})
+		case strings.Contains(query, "findRecentMergedPullRequests"):
+			return emptyRecentMergedResponse(t)
+		}
+		t.Fatalf("unexpected graphql query: %s", query)
+		return nil
+	})
+	for _, want := range []string{"(#402)", "(#401)", "prev=" + since} {
+		if !strings.Contains(body, want) {
+			t.Errorf("body missing %q: %s", want, body)
+		}
+	}
+	for _, unwanted := range []string{"(#400)", "(#399)"} {
+		if strings.Contains(body, unwanted) {
+			t.Errorf("body lists %q, which is at or before since: %s", unwanted, body)
+		}
+	}
+}
+
+// A tag as since compares against the tag, whose commits come back oldest
+// first; the link must still start at the tag, not at the newest commit.
+func TestRunDraftFirstReleaseSinceATagLinksFromTheTag(t *testing.T) {
+	first, second := fmt.Sprintf("%040x", 501), fmt.Sprintf("%040x", 502)
+	body := runFirstReleaseWithSince(t, "start-point", func(query string, _ map[string]any) []byte {
+		switch {
+		case strings.Contains(query, "findCommitsInComparison"):
+			return comparisonCommitsResponse(t, []map[string]any{
+				firstReleaseCommitNode(first, 501, "feat: first after the tag", "2026-05-01T00:00:00Z"),
+				firstReleaseCommitNode(second, 502, "fix: second after the tag", "2026-05-02T00:00:00Z"),
+			})
+		case strings.Contains(query, "findRecentMergedPullRequests"):
+			return emptyRecentMergedResponse(t)
+		}
+		t.Fatalf("unexpected graphql query: %s", query)
+		return nil
+	})
+	if !strings.Contains(body, "prev=start-point") {
+		t.Errorf("first-release previous tag should be the since tag: %s", body)
+	}
+}

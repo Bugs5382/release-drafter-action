@@ -113,7 +113,7 @@ Every release-drafter v7 input is supported, plus `config`, `extends`, `extends-
 | `header` | Text added before the body. |
 | `footer` | Text added after the body. |
 | `filter-by-range` | Semver range the last release must satisfy. |
-| `since` | First-release start point: a tag, SHA or date. |
+| `since` | First-release start point: a tag, SHA or date. With a tag or SHA, the release lists what came after that commit, and `$PREVIOUS_TAG` is the tag or SHA itself. With a date, it lists what was committed from then on, and `$PREVIOUS_TAG` is the oldest commit listed. |
 | `first-version` | Resolved version for a first release (no version/tag/name override), instead of incrementing from 0.0.0. Default `1.0.0`. |
 | `dry-run` | Print the body and outputs, write nothing. |
 

@@ -119,8 +119,34 @@ func (c *Client) CommitsInRange(ctx context.Context, owner, repo, baseRef, headR
 // against, so the whole history (or everything after since) stands in for
 // the commit range.
 func (c *Client) CommitsSince(ctx context.Context, owner, repo, target string, since *string, fields CommitFieldOptions) ([]model.Commit, error) {
+	out, _, err := c.walkHistory(ctx, owner, repo, target, since, "", fields)
+	return out, err
+}
+
+// CommitsAfter walks the history reachable from target, newest first, and
+// stops at the commit sinceOID, which it leaves out. It is the first-release
+// walk for a since given as a SHA: a SHA isn't a ref name, so it can't be
+// compared through repository.ref the way a tag is. It fails when sinceOID
+// isn't in the target's history.
+func (c *Client) CommitsAfter(ctx context.Context, owner, repo, target, sinceOID string, fields CommitFieldOptions) ([]model.Commit, error) {
+	out, found, err := c.walkHistory(ctx, owner, repo, target, nil, sinceOID, fields)
+	if err != nil {
+		return nil, err
+	}
+	if !found {
+		c.log.Error().Str("owner", owner).Str("repo", repo).Str("target", target).Str("since", sinceOID).
+			Msg("github: since commit not in the target's history")
+		return nil, fmt.Errorf("github: walking history of %s for %s/%s: since commit %s is not in it", target, owner, repo, sinceOID)
+	}
+	return out, nil
+}
+
+// walkHistory pages through the history reachable from target, newest first,
+// trimmed by the since timestamp when it is non-nil. With stopAt set it ends
+// at that commit, leaves it out, and reports whether it was found.
+func (c *Client) walkHistory(ctx context.Context, owner, repo, target string, since *string, stopAt string, fields CommitFieldOptions) ([]model.Commit, bool, error) {
 	fields = fields.withDefaults()
-	c.log.Debug().Str("owner", owner).Str("repo", repo).Str("target", target).Msg("github: walking commit history")
+	c.log.Debug().Str("owner", owner).Str("repo", repo).Str("target", target).Str("stop_at", stopAt).Msg("github: walking commit history")
 	var out []model.Commit
 	cursor := ""
 	for page := 1; ; page++ {
@@ -145,13 +171,18 @@ func (c *Client) CommitsSince(ctx context.Context, owner, repo, target string, s
 		if err := c.doGraphQL(ctx, findCommitsSinceQuery, vars, &data); err != nil {
 			c.log.Error().Err(err).Str("owner", owner).Str("repo", repo).Str("target", target).
 				Msg("github: failed to walk commit history")
-			return nil, fmt.Errorf("github: walking history of %s for %s/%s: %w", target, owner, repo, err)
+			return nil, false, fmt.Errorf("github: walking history of %s for %s/%s: %w", target, owner, repo, err)
 		}
 		if data.Repository == nil || data.Repository.Object == nil || data.Repository.Object.History == nil {
-			return nil, fmt.Errorf("github: walking history of %s for %s/%s: target is not a commit", target, owner, repo)
+			return nil, false, fmt.Errorf("github: walking history of %s for %s/%s: target is not a commit", target, owner, repo)
 		}
 		history := data.Repository.Object.History
 		for _, n := range history.Nodes {
+			if stopAt != "" && n.Oid == stopAt {
+				c.log.Info().Str("owner", owner).Str("repo", repo).Int("commits", len(out)).Int("page", page).
+					Msg("github: walked commit history to the since commit")
+				return out, true, nil
+			}
 			out = append(out, n.toModel())
 		}
 		c.log.Trace().Int("page", page).Int("commits", len(history.Nodes)).Bool("has_next_page", history.PageInfo.HasNextPage).
@@ -162,5 +193,5 @@ func (c *Client) CommitsSince(ctx context.Context, owner, repo, target string, s
 		cursor = history.PageInfo.EndCursor
 	}
 	c.log.Info().Str("owner", owner).Str("repo", repo).Int("commits", len(out)).Msg("github: walked commit history")
-	return out, nil
+	return out, false, nil
 }

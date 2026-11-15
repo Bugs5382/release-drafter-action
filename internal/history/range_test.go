@@ -34,12 +34,18 @@ type fakeRangeClient struct {
 		target string
 		since  *string
 	}
-	commits []model.Commit
-	err     error
+	afterCalls []struct{ target, since string }
+	commits    []model.Commit
+	err        error
 }
 
 func (f *fakeRangeClient) CommitsInRange(_ context.Context, _, _, baseRef, headRef string, _ github.CommitFieldOptions) ([]model.Commit, error) {
 	f.inRangeCalls = append(f.inRangeCalls, struct{ baseRef, headRef string }{baseRef, headRef})
+	return f.commits, f.err
+}
+
+func (f *fakeRangeClient) CommitsAfter(_ context.Context, _, _, target, since string, _ github.CommitFieldOptions) ([]model.Commit, error) {
+	f.afterCalls = append(f.afterCalls, struct{ target, since string }{target, since})
 	return f.commits, f.err
 }
 
@@ -93,17 +99,29 @@ func TestCollectCommitsFirstReleaseWithADateSince(t *testing.T) {
 	}
 }
 
-func TestCollectCommitsFirstReleaseWithATagOrSHASince(t *testing.T) {
-	cases := []string{"v0.9.0", "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"}
-	for _, since := range cases {
-		f := &fakeRangeClient{}
-		_, err := CollectCommits(context.Background(), f, RangeInput{Owner: "acme", Repo: "widget", Commitish: "main", Since: since})
-		if err != nil {
-			t.Fatalf("CollectCommits(%s): %v", since, err)
-		}
-		if len(f.inRangeCalls) != 1 || f.inRangeCalls[0].baseRef != since || f.inRangeCalls[0].headRef != "main" {
-			t.Fatalf("CollectCommits(%s): inRangeCalls = %+v", since, f.inRangeCalls)
-		}
+func TestCollectCommitsFirstReleaseWithATagSinceComparesAgainstTheTag(t *testing.T) {
+	f := &fakeRangeClient{}
+	if _, err := CollectCommits(context.Background(), f, RangeInput{Owner: "acme", Repo: "widget", Commitish: "main", Since: "v0.9.0"}); err != nil {
+		t.Fatalf("CollectCommits: %v", err)
+	}
+	if len(f.inRangeCalls) != 1 || f.inRangeCalls[0].baseRef != "v0.9.0" || f.inRangeCalls[0].headRef != "main" {
+		t.Fatalf("inRangeCalls = %+v", f.inRangeCalls)
+	}
+}
+
+// A SHA isn't a ref name, so the compare-by-ref query can't take it: the walk
+// goes down the target's history and stops at the SHA instead.
+func TestCollectCommitsFirstReleaseWithASHASinceWalksHistoryToIt(t *testing.T) {
+	sha := "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
+	f := &fakeRangeClient{}
+	if _, err := CollectCommits(context.Background(), f, RangeInput{Owner: "acme", Repo: "widget", Commitish: "main", Since: sha}); err != nil {
+		t.Fatalf("CollectCommits: %v", err)
+	}
+	if len(f.inRangeCalls) != 0 {
+		t.Fatalf("a SHA must not be compared as a ref: inRangeCalls = %+v", f.inRangeCalls)
+	}
+	if len(f.afterCalls) != 1 || f.afterCalls[0].since != sha || f.afterCalls[0].target != "main" {
+		t.Fatalf("afterCalls = %+v", f.afterCalls)
 	}
 }
 

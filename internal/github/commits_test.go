@@ -22,6 +22,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"strings"
 	"testing"
 )
 
@@ -134,5 +135,56 @@ func TestCommitsSincePassesTheSinceTimestamp(t *testing.T) {
 	}
 	if gotVars["since"] != since {
 		t.Errorf("since = %v, want %s", gotVars["since"], since)
+	}
+}
+
+func TestCommitsAfterWalksHistoryAcrossPagesAndStopsBeforeTheSinceCommit(t *testing.T) {
+	page := 0
+	f := newFakeServer(t, func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Variables map[string]any `json:"variables"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		if _, ok := body.Variables["since"]; ok {
+			t.Errorf("a commit walk must not send a since timestamp, got %v", body.Variables["since"])
+		}
+		page++
+		w.Header().Set("Content-Type", "application/json")
+		node := func(oid string) string {
+			return `{"oid":"` + oid + `","committedDate":"2026-01-01T00:00:00Z","message":"m","author":{"name":"A","user":{"login":"a"}},"authors":{"nodes":[]},"associatedPullRequests":{"nodes":[]}}`
+		}
+		if page == 1 {
+			_, _ = w.Write([]byte(`{"data":{"repository":{"object":{"history":{"pageInfo":{"hasNextPage":true,"endCursor":"c1"},"nodes":[` + node("ccc333") + `,` + node("bbb222") + `]}}}}}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"data":{"repository":{"object":{"history":{"pageInfo":{"hasNextPage":true,"endCursor":"c2"},"nodes":[` + node("aaa111") + `,` + node("start0") + `,` + node("older9") + `]}}}}}`))
+	})
+	c := newTestClient(t, f)
+
+	commits, err := c.CommitsAfter(context.Background(), "acme", "widget", "main", "start0", CommitFieldOptions{})
+	if err != nil {
+		t.Fatalf("CommitsAfter: %v", err)
+	}
+	var got []string
+	for _, cm := range commits {
+		got = append(got, cm.OID)
+	}
+	if strings.Join(got, ",") != "ccc333,bbb222,aaa111" {
+		t.Fatalf("commits = %v, want the three after start0, newest first", got)
+	}
+	if page != 2 {
+		t.Errorf("fetched %d pages, want 2: the walk stops at the since commit", page)
+	}
+}
+
+func TestCommitsAfterFailsWhenTheSinceCommitIsNotInTheHistory(t *testing.T) {
+	f := newFakeServer(t, func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"data":{"repository":{"object":{"history":{"pageInfo":{"hasNextPage":false,"endCursor":""},"nodes":[{"oid":"ccc333","committedDate":"2026-01-01T00:00:00Z","message":"m","author":{"name":"A","user":{"login":"a"}},"authors":{"nodes":[]},"associatedPullRequests":{"nodes":[]}}]}}}}}`))
+	})
+	c := newTestClient(t, f)
+
+	if _, err := c.CommitsAfter(context.Background(), "acme", "widget", "main", "missing", CommitFieldOptions{}); err == nil {
+		t.Fatal("CommitsAfter returned no error for a since commit outside the target's history")
 	}
 }

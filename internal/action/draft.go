@@ -108,12 +108,17 @@ func runDraft(ctx context.Context, client *github.Client, o Options, in parsedIn
 		return fail(ann, err)
 	}
 
-	// On a first release there is no last release to anchor $PREVIOUS_TAG,
-	// so it falls back to the oldest commit in range: CommitsSince returns
-	// history newest first, so that commit is the last element.
+	// On a first release there is no last release to anchor $PREVIOUS_TAG.
+	// A since that names a commit (a tag or a SHA) is where the range starts,
+	// so it anchors the link. Otherwise it falls back to the oldest commit in
+	// range: the history walk returns newest first, so that's the last one.
 	previousTag := ""
-	if last == nil && len(commits) > 0 {
-		previousTag = commits[len(commits)-1].OID
+	if last == nil {
+		if _, expression := history.ParseSince(in.Since); expression != "" {
+			previousTag = expression
+		} else if len(commits) > 0 {
+			previousTag = commits[len(commits)-1].OID
+		}
 	}
 
 	payload, err := render.Build(render.BuildInput{
